@@ -1,6 +1,6 @@
 [project]
 name = "budgetbakers-partner-sdk"
-version = "0.1.0"
+version = "0.1.1"
 description = "BudgetBakers Partner API server SDK (AISP): typed client, webhook verification, hosted connect sessions."
 readme = "README.md"
 requires-python = ">=3.10"
