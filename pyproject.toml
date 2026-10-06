@@ -1,13 +1,32 @@
 [project]
 name = "budgetbakers-partner-sdk"
-version = "0.1.1"
+version = "0.2.0"
 description = "BudgetBakers Partner API server SDK (AISP): typed client, webhook verification, hosted connect sessions."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "BudgetBakers", email = "integration@budgetbakers.com" }]
+keywords = ["budgetbakers", "open-banking", "aisp", "psd2", "partner-api", "webhooks"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Office/Business :: Financial",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
 # The one runtime dependency (justified: sync HTTP client with timeouts and
 # connection pooling; stdlib urllib has no sane retry/timeout ergonomics).
 dependencies = ["httpx>=0.27,<1"]
+
+[project.urls]
+Homepage = "https://aisp-docs.bbapi.io"
+Documentation = "https://aisp-docs.bbapi.io"
+Source = "https://github.com/BudgetBakers/partner-sdk-python"
+Changelog = "https://github.com/BudgetBakers/partner-sdk-python/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
@@ -17,7 +36,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

@@ -1,7 +1,9 @@
-"""The SDK surface (DESIGN.md §9.1), mirroring @budgetbakers/partner-sdk:
+"""The SDK surface, mirroring @budgetbakers/partner-sdk:
 client-scoped ergonomics hiding X-Client-Id, generator-based cursor
 pagination, automatic Idempotency-Key on creates (explicit override), and a
-connect-session polling helper. Amounts are decimal.Decimal — never float."""
+connect-session polling helper. Reads and creates live on /v2; the
+connection lifecycle actions live on /v1.
+Amounts are decimal.Decimal — never float."""
 
 from __future__ import annotations
 
@@ -15,7 +17,8 @@ import httpx
 
 from ._transport import Transport
 
-DEFAULT_BASE_URL = "https://partner.test.bbapi.dev"
+# The production partner edge; sandbox vs live is selected by the key.
+DEFAULT_BASE_URL = "https://aisp-partner.bbapi.io"
 
 _TERMINAL_STATES = frozenset({"Completed", "Failed", "Cancelled", "Expired"})
 
@@ -42,6 +45,7 @@ class _Connections:
         self._t = transport
         self._cid = client_id
 
+    # Lifecycle actions (create, delete, refresh, reconnect, revoke) live on /v1.
     def create(self, provider_id: str, *, idempotency_key: str | None = None) -> JsonDict:
         return self._t.request_dict(
             "POST",
@@ -52,8 +56,9 @@ class _Connections:
         )
 
     def get(self, connection_id: str) -> JsonDict:
-        return self._t.request_dict(
-            "GET", f"/v1/connections/{_q(connection_id)}", client_id=self._cid
+        """The stored connection record: state, provider, consent expiry."""
+        return self._t.request_data(
+            "GET", f"/v2/connections/{_q(connection_id)}", client_id=self._cid
         )
 
     def delete(self, connection_id: str) -> None:
@@ -79,12 +84,23 @@ class _Connections:
             "PATCH", f"/v1/connections/{_q(connection_id)}/revoke", client_id=self._cid
         )
 
-    def list_accounts(self, connection_id: str) -> list[JsonDict]:
-        """Raw array, capped at 100 by the API (not paginated)."""
-        result = self._t.request_list(
-            "GET", f"/v1/connections/{_q(connection_id)}/accounts", client_id=self._cid
+    def account_pages(self, connection_id: str, *, limit: int | None = None) -> Iterator[JsonDict]:
+        """Page-level iteration when you need cursors/limits."""
+        return _pages(
+            lambda cursor: self._t.request_dict(
+                "GET",
+                f"/v2/connections/{_q(connection_id)}/accounts",
+                client_id=self._cid,
+                query={"limit": limit, "nextCursor": cursor},
+            )
         )
-        return result
+
+    def list_accounts(self, connection_id: str) -> list[JsonDict]:
+        """Every account of the connection, all pages walked; Disabled ones included."""
+        accounts: list[JsonDict] = []
+        for page in self.account_pages(connection_id):
+            accounts.extend(page.get("data", []))
+        return accounts
 
 
 class _Accounts:
@@ -92,20 +108,53 @@ class _Accounts:
         self._t = transport
         self._cid = client_id
 
-    def transaction_pages(self, account_id: str, *, limit: int | None = None) -> Iterator[JsonDict]:
-        """Page-level iteration (cursor pagination until nextCursor is null)."""
+    def get(self, account_id: str) -> JsonDict:
+        return self._t.request_data("GET", f"/v2/accounts/{_q(account_id)}", client_id=self._cid)
+
+    def transaction_pages(
+        self,
+        account_id: str,
+        *,
+        limit: int | None = None,
+        sort: str | None = None,
+        order: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        record_state: str | None = None,
+        variable_symbol: list[str] | None = None,
+        since_seq: int | None = None,
+        since_created_seq: int | None = None,
+    ) -> Iterator[JsonDict]:
+        """Page-level iteration (keyset cursor until nextCursor is null).
+
+        ``sort`` is ``recordDate`` (default) or ``amount``; ``order`` ``desc`` or
+        ``asc``; ``date_from``/``date_to`` are inclusive ``YYYY-MM-DD`` bounds on
+        recordDate; ``variable_symbol`` filters on details.variableSymbol (up to
+        20 values); ``since_seq``/``since_created_seq`` are the delta feeds and
+        combine only with ``limit``."""
         return _pages(
             lambda cursor: self._t.request_dict(
                 "GET",
-                f"/v1/accounts/{_q(account_id)}/transactions",
+                f"/v2/accounts/{_q(account_id)}/transactions",
                 client_id=self._cid,
-                query={"limit": limit, "nextCursor": cursor},
+                query={
+                    "limit": limit,
+                    "sort": sort,
+                    "order": order,
+                    "dateFrom": date_from,
+                    "dateTo": date_to,
+                    "recordState": record_state,
+                    "variableSymbol": variable_symbol,
+                    "sinceSeq": since_seq,
+                    "sinceCreatedSeq": since_created_seq,
+                    "nextCursor": cursor,
+                },
             )
         )
 
-    def transactions(self, account_id: str, *, limit: int | None = None) -> Iterator[JsonDict]:
-        """Iterate every transaction across pages."""
-        for page in self.transaction_pages(account_id, limit=limit):
+    def transactions(self, account_id: str, **params: Any) -> Iterator[JsonDict]:
+        """Iterate every transaction across pages (same keyword filters as transaction_pages)."""
+        for page in self.transaction_pages(account_id, **params):
             yield from page.get("data", [])
 
 
@@ -131,7 +180,7 @@ class _ConnectSessions:
             body["connectionId"] = connection_id
         return self._t.request_dict(
             "POST",
-            "/v1/connect-sessions",
+            "/v2/connect-sessions",
             client_id=self._cid,
             body=body,
             idempotency_key=idempotency_key or str(uuid.uuid4()),
@@ -139,7 +188,7 @@ class _ConnectSessions:
 
     def get(self, session_id: str) -> JsonDict:
         return self._t.request_dict(
-            "GET", f"/v1/connect-sessions/{_q(session_id)}", client_id=self._cid
+            "GET", f"/v2/connect-sessions/{_q(session_id)}", client_id=self._cid
         )
 
     def wait_for_terminal(
@@ -174,9 +223,9 @@ class ClientScope:
         self.connect_sessions = _ConnectSessions(transport, client_id)
 
     def delete(self) -> None:
-        """Delete this client and purge related data (DPA/SLA)."""
+        """Delete this client and cascade to their connections, accounts and transactions."""
         self._t.request_dict(
-            "DELETE", f"/v1/clients/{_q(self.client_id)}", client_id=self.client_id
+            "DELETE", f"/v2/clients/{_q(self.client_id)}", client_id=self.client_id
         )
 
 
@@ -185,14 +234,18 @@ class _Clients:
         self._t = transport
 
     def create(self, **fields: Any) -> JsonDict:
-        """Upserts by externalId: an existing externalId returns the existing client."""
-        return self._t.request_dict("POST", "/v1/clients", body=fields)
+        """Create ``email=``, ``countryCode=`` and optionally ``externalId=``; upserts by
+        externalId, so an existing externalId returns the existing client."""
+        return self._t.request_data("POST", "/v2/clients", body=fields)
 
     def get(self, client_id: str) -> JsonDict:
-        return self._t.request_dict("GET", f"/v1/clients/{_q(client_id)}")
+        return self._t.request_data("GET", f"/v2/clients/{_q(client_id)}", client_id=client_id)
 
-    def get_by_external_id(self, external_id: str) -> JsonDict:
-        return self._t.request_dict("GET", "/v1/clients", query={"externalId": external_id})
+    def get_by_external_id(self, external_id: str) -> JsonDict | None:
+        """Exact match on your externalId; None when no client carries it."""
+        page = self._t.request_dict("GET", "/v2/clients", query={"externalId": external_id})
+        data = page.get("data", [])
+        return data[0] if isinstance(data, list) and data else None
 
 
 class _Providers:
@@ -209,7 +262,7 @@ class _Providers:
         return _pages(
             lambda cursor: self._t.request_dict(
                 "GET",
-                "/v1/providers",
+                "/v2/providers",
                 query={"country": country, "search": search, "limit": limit, "nextCursor": cursor},
             )
         )
@@ -232,7 +285,7 @@ class _Partner:
 
     def get_config(self) -> JsonDict:
         """Capability discovery — self-description of the calling partner + key mode."""
-        return self._t.request_dict("GET", "/v1/partner/config")
+        return self._t.request_dict("GET", "/v2/partner/config")
 
 
 class BudgetBakers:
@@ -241,7 +294,7 @@ class BudgetBakers:
     Example::
 
         bb = BudgetBakers(api_key=os.environ["BB_API_KEY"])
-        client = bb.clients.create(externalId="user-42")
+        client = bb.clients.create(email="user@example.com", countryCode="CZ", externalId="user-42")
         scope = bb.client(client["id"])
         session = scope.connect_sessions.create("https://app.example.com/bb-callback")
     """

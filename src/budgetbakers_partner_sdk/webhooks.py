@@ -43,6 +43,8 @@ EVENT_TYPES: frozenset[str] = frozenset(
         "TransactionsFetchingFailed",
         "ConnectionCreateSuccess",
         "ConnectionCreateFailed",
+        "ConnectionReconnectSuccess",
+        "ConnectionReconnectFailed",
         "ConnectionRefreshSuccess",
         "ConnectionRefreshFailed",
         "ConnectionDeleted",
@@ -121,7 +123,7 @@ def parse_event(raw_body: bytes | str) -> dict[str, Any]:
 
         {"kind": "event", "type", "eventId", "clientId", "connectionId",
          "createdAt", "reason", "extra"}
-        {"kind": "unknown", "type", "raw"}      # respond 2xx and ignore (D11)
+        {"kind": "unknown", "type", "raw"}      # respond 2xx and ignore
         {"kind": "parse_error", "message"}
     """
     text = raw_body.decode("utf-8", errors="replace") if isinstance(raw_body, bytes) else raw_body

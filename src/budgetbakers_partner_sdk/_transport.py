@@ -93,7 +93,14 @@ class Transport:
         result = self.request(method, path, **kwargs)
         return result if isinstance(result, dict) else {}
 
-    def request_list(self, method: str, path: str, **kwargs: Any) -> list[dict[str, Any]]:
-        """request() with the raw-array shape asserted (accounts list)."""
-        result = self.request(method, path, **kwargs)
-        return result if isinstance(result, list) else []
+    def request_data(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        """request() for v2 single-resource operations: returns the envelope's ``data``."""
+        return unwrap_data(self.request(method, path, **kwargs))
+
+
+def unwrap_data(body: Any) -> dict[str, Any]:
+    """Unwrap the v2 single-resource envelope ``{"data": ...}``."""
+    if isinstance(body, dict) and "data" in body:
+        data = body["data"]
+        return data if isinstance(data, dict) else {}
+    raise TypeError("partner API: expected a { data } envelope")

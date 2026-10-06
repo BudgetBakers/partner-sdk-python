@@ -1,8 +1,10 @@
 """Decimal-safe JSON parsing. Money is never a float.
 
-``json.loads(parse_float=Decimal)`` keeps fractional amounts exact; integral
-amounts arrive as ``int`` and are normalized at the money keys. Every money
-value is quantized to exactly two decimal places.
+v2 serves money as decimal strings ("816.00", or "1.005" when the third
+digit carries value); v1 served bare numbers. Both are turned into
+``decimal.Decimal`` at the money keys: ``json.loads(parse_float=Decimal)``
+keeps fractional literals exact, strings are parsed directly. Amounts are
+normalized to two decimal places unless a third one carries value.
 """
 
 from __future__ import annotations
@@ -22,13 +24,22 @@ def quantize2(value: Decimal | int | str) -> Decimal:
     return Decimal(value).quantize(_TWO_DP)
 
 
+def to_money(value: Decimal | int | str) -> Decimal:
+    """Wire amount -> Decimal at 2 dp; a value-carrying third decimal is kept ("1.005")."""
+    exact = Decimal(value)
+    rounded = exact.quantize(_TWO_DP)
+    return rounded if rounded == exact else exact
+
+
 def _walk(value: Any, key: str | None) -> Any:
     if isinstance(value, Decimal | int) and not isinstance(value, bool):
         if key in MONEY_KEYS:
-            return quantize2(value)
+            return to_money(value)
         # Non-money numbers stay plain (ints stay ints; floats were parsed as
         # Decimal -- collapse them back for ergonomic non-money fields).
         return int(value) if value == int(value) else float(value)
+    if isinstance(value, str) and key in MONEY_KEYS:
+        return to_money(value)
     if isinstance(value, list):
         return [_walk(item, key) for item in value]
     if isinstance(value, dict):
@@ -37,5 +48,5 @@ def _walk(value: Any, key: str | None) -> Any:
 
 
 def parse_body(text: str) -> Any:
-    """Parse an API response body: money keys -> 2-dp Decimal, rest untouched."""
+    """Parse an API response body: money keys -> Decimal, rest untouched."""
     return _walk(json.loads(text, parse_float=Decimal), None)

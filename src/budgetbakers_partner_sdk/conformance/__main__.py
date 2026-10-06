@@ -80,6 +80,58 @@ def _sum(amounts: list[str | None]) -> str:
     return str(total.quantize(Decimal("0.01")))
 
 
+def _account_view_v2(account: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": account.get("id"),
+        "balance": _money(account.get("balance")),
+        "subscriptionStatus": account.get("subscriptionStatus"),
+    }
+
+
+def _transaction_kwargs(args: dict[str, Any]) -> dict[str, Any]:
+    variable_symbol = args.get("variableSymbol")
+    return {
+        "limit": args.get("limit"),
+        "sort": args.get("sort"),
+        "order": args.get("order"),
+        "date_from": args.get("dateFrom"),
+        "date_to": args.get("dateTo"),
+        "record_state": args.get("recordState"),
+        "variable_symbol": None if variable_symbol is None else [str(variable_symbol)],
+        "since_seq": args.get("sinceSeq"),
+        "since_created_seq": args.get("sinceCreatedSeq"),
+    }
+
+
+def _walk_transactions(scope: ClientScope, args: dict[str, Any]) -> dict[str, Any]:
+    amounts: list[str | None] = []
+    seqs: list[Any] = []
+    count = 0
+    pages = 0
+    any_recurrent = False
+    for page in scope.accounts.transaction_pages(
+        str(args["accountId"]), **_transaction_kwargs(args)
+    ):
+        pages += 1
+        data = page.get("data", [])
+        count += len(data)
+        for t in data:
+            amounts.append(_money(t.get("amount")))
+            seq = t.get("seq")
+            seqs.append(seq if isinstance(seq, int) else None)
+            enrichment = t.get("enrichment")
+            if isinstance(enrichment, dict) and enrichment.get("recurrent") is True:
+                any_recurrent = True
+    return {
+        "count": count,
+        "pages": pages,
+        "amounts": amounts,
+        "seqs": seqs,
+        "sumAmount": _sum(amounts),
+        "anyRecurrent": any_recurrent,
+    }
+
+
 def _run_op(  # noqa: C901 — one dispatch table, mirrors PROTOCOL.md 1:1
     bb: BudgetBakers, op: str, args: dict[str, Any], config: dict[str, Any]
 ) -> Any:
@@ -154,17 +206,54 @@ def _run_op(  # noqa: C901 — one dispatch table, mirrors PROTOCOL.md 1:1
         accounts = scope().connections.list_accounts(str(args["connectionId"]))
         return {"count": len(accounts), "accounts": [_account_view(a) for a in accounts]}
     if op == "transactions.listAll":
-        amounts: list[str | None] = []
-        count = 0
+        walked = _walk_transactions(scope(), args)
+        return {k: walked[k] for k in ("count", "pages", "amounts", "sumAmount")}
+    # v2-shaped views: same SDK calls, the normalization keeps the v2 fields.
+    if op == "clientsV2.create":
+        client = bb.clients.create(**args)
+        return {"id": client.get("id"), "externalId": client.get("externalId")}
+    if op == "clientsV2.getByExternalId":
+        found = bb.clients.get_by_external_id(str(args["externalId"]))
+        return {
+            "count": 0 if found is None else 1,
+            "ids": [] if found is None else [found.get("id")],
+        }
+    if op == "connectionsV2.get":
+        conn = scope().connections.get(str(args["connectionId"]))
+        return {
+            "id": conn.get("id"),
+            "state": conn.get("state"),
+            "consentExpiresAt": conn.get("consentExpiresAt"),
+        }
+    if op == "providersV2.listAll":
+        codes: list[Any] = []
+        statuses: list[Any] = []
         pages = 0
-        for page in scope().accounts.transaction_pages(
-            str(args["accountId"]), limit=args.get("limit")
+        for page in bb.providers.pages(
+            country=args.get("country"), search=args.get("search"), limit=args.get("limit")
         ):
             pages += 1
-            data = page.get("data", [])
-            count += len(data)
-            amounts.extend(_money(t.get("amount")) for t in data)
-        return {"count": count, "pages": pages, "amounts": amounts, "sumAmount": _sum(amounts)}
+            for p in page.get("data", []):
+                codes.append(p.get("code"))
+                statuses.append(p.get("status"))
+        return {"count": len(codes), "pages": pages, "codes": codes, "statuses": statuses}
+    if op == "accountsV2.list":
+        accounts_v2: list[dict[str, Any]] = []
+        pages = 0
+        for page in scope().connections.account_pages(
+            str(args["connectionId"]), limit=args.get("limit")
+        ):
+            pages += 1
+            accounts_v2.extend(page.get("data", []))
+        return {
+            "count": len(accounts_v2),
+            "pages": pages,
+            "accounts": [_account_view_v2(a) for a in accounts_v2],
+        }
+    if op == "accountsV2.get":
+        return _account_view_v2(scope().accounts.get(str(args["accountId"])))
+    if op == "transactionsV2.listAll":
+        return _walk_transactions(scope(), args)
     raise LookupError(op)
 
 
