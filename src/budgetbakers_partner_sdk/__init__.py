@@ -10,7 +10,7 @@ from .client import DEFAULT_BASE_URL, BudgetBakers, ClientScope
 from .errors import PartnerApiError, PartnerApiUnreachable
 from .webhooks import SIGNATURE_HEADER, TOLERANCE_SECONDS, parse_event, sign, verify
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 __all__ = [
     "DEFAULT_BASE_URL",
