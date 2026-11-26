@@ -72,15 +72,15 @@ Verify over the raw request body bytes, before any JSON parsing.
 - **Nullability** - only `id` is guaranteed on Client/Connection/Account
   payloads (plus `subscriptionStatus` on accounts and `seq`/`createdSeq`/
   `recordDate` on transactions).
-- **Paths** - reads and creates call `/v2` and unwrap the `{"data": ...}`
-  envelope; the connection lifecycle actions (`connections.create/delete/
-  refresh/reconnect/revoke`) call `/v1`, where they live today.
+- **Paths** - every call goes to `/v2` and unwraps the `{"data": ...}`
+  envelope. The connection lifecycle actions, connect sessions and partner
+  config also accept the bare body they answered before 0.3.0.
   `clients.get_by_external_id` returns `None` when nothing matches.
 
 ## Documentation
 
 Guides and the API reference: <https://aisp-docs.bbapi.io>. Questions:
-[integration@budgetbakers.com](mailto:integration@budgetbakers.com).
+[partners@budgetbakers.com](mailto:partners@budgetbakers.com).
 
 ## Licence
 

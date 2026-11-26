@@ -1,5 +1,6 @@
-"""Reads and creates on /v2 with the {data} envelope unwrapped; the
-connection lifecycle actions stay on /v1."""
+"""Every operation on /v2, with the {data} envelope unwrapped on reads and
+creates; sessions, partner config and the connection lifecycle actions take
+both the {data} body and the bare one older API versions answered."""
 
 from collections.abc import Callable
 from decimal import Decimal
@@ -92,31 +93,31 @@ def recording(responses: list[httpx.Response]) -> tuple[list[httpx.Request], Any
         (
             "connections.create",
             "POST",
-            "/v1/connections",
+            "/v2/connections",
             lambda bb: bb.client("c1").connections.create("p"),
         ),
         (
             "connections.delete",
             "DELETE",
-            "/v1/connections/x1",
+            "/v2/connections/x1",
             lambda bb: bb.client("c1").connections.delete("x1"),
         ),
         (
             "connections.refresh",
             "POST",
-            "/v1/connections/x1/refresh",
+            "/v2/connections/x1/refresh",
             lambda bb: bb.client("c1").connections.refresh("x1"),
         ),
         (
             "connections.reconnect",
             "POST",
-            "/v1/connections/x1/reconnect",
+            "/v2/connections/x1/reconnect",
             lambda bb: bb.client("c1").connections.reconnect("x1"),
         ),
         (
             "connections.revoke",
             "PATCH",
-            "/v1/connections/x1/revoke",
+            "/v2/connections/x1/revoke",
             lambda bb: bb.client("c1").connections.revoke("x1"),
         ),
     ],
@@ -142,6 +143,7 @@ def test_unwraps_the_data_envelope() -> None:
                         "id": "x1",
                         "state": "Active",
                         "consentExpiresAt": "2026-10-27T00:00:00Z",
+                        "consentRevokedAt": None,
                     }
                 },
             ),
@@ -155,7 +157,12 @@ def test_unwraps_the_data_envelope() -> None:
     assert bb.clients.get("c1")["id"] == "c1"
     assert seen[1].headers["X-Client-Id"] == "c1"
     conn = bb.client("c1").connections.get("x1")
-    assert conn == {"id": "x1", "state": "Active", "consentExpiresAt": "2026-10-27T00:00:00Z"}
+    assert conn == {
+        "id": "x1",
+        "state": "Active",
+        "consentExpiresAt": "2026-10-27T00:00:00Z",
+        "consentRevokedAt": None,
+    }
     account = bb.client("c1").accounts.get("a1")
     assert account["balance"] == Decimal("0.10")
     assert account["subscriptionStatus"] == "Active"
@@ -231,3 +238,110 @@ def test_transaction_filters_are_encoded_and_variable_symbol_repeats() -> None:
     assert params["recordState"] == "Cleared"
     assert params["sinceSeq"] == "9002"
     assert params["limit"] == "5"
+
+
+# The API wraps every single resource in {data}. The methods that used to read a
+# bare body take both shapes, so an SDK on either side of the deploy works.
+WRAPPED_CONFIG = {
+    "partnerId": "p1",
+    "name": "Acme",
+    "mode": "sandbox",
+    "capabilities": {"refresh": True, "reconnect": True},
+    "consentDuration": None,
+    "countries": ["CZ"],
+    "webhook": {"signatureVersion": "v1"},
+}
+WRAPPED_CREATED = {
+    "connectionId": "conn1",
+    "redirectUrl": "https://bank.test/auth",
+    "expiresAt": "2026-10-01T10:00:00Z",
+}
+WRAPPED_SESSION = {
+    "sessionId": "s1",
+    "hostedUrl": "https://connect.test/s1",
+    "expiresAt": "2026-10-01T10:00:00Z",
+}
+WRAPPED_POLLED = {
+    "sessionId": "s1",
+    "state": "Failed",
+    "connectionId": None,
+    "resultCode": "Error",
+    "error": "provider_unavailable",
+}
+WRAPPED_REFRESHED = {"connectionId": "conn1", "status": "Accepted", "nextRefreshPossibleAt": None}
+
+WRAPPED_CASES = [
+    ("partner.get_config", 200, WRAPPED_CONFIG, lambda bb: bb.partner.get_config()),
+    (
+        "connect_sessions.create",
+        201,
+        WRAPPED_SESSION,
+        lambda bb: bb.client("c1").connect_sessions.create("https://x.test/cb"),
+    ),
+    (
+        "connect_sessions.get",
+        200,
+        WRAPPED_POLLED,
+        lambda bb: bb.client("c1").connect_sessions.get("s1"),
+    ),
+    (
+        "connections.create",
+        200,
+        WRAPPED_CREATED,
+        lambda bb: bb.client("c1").connections.create("p"),
+    ),
+    (
+        "connections.reconnect",
+        200,
+        WRAPPED_CREATED,
+        lambda bb: bb.client("c1").connections.reconnect("conn1"),
+    ),
+    (
+        "connections.refresh",
+        202,
+        WRAPPED_REFRESHED,
+        lambda bb: bb.client("c1").connections.refresh("conn1"),
+    ),
+]
+
+
+@pytest.mark.parametrize(("name", "status", "resource", "call"), WRAPPED_CASES)
+def test_envelope_wrapped_body_returns_the_resource(
+    name: str, status: int, resource: dict[str, Any], call: Callable[[BudgetBakers], Any]
+) -> None:
+    _seen, handler = recording([httpx.Response(status, json={"data": resource})])
+    assert call(make_bb(handler)) == resource, name
+
+
+@pytest.mark.parametrize(("name", "status", "resource", "call"), WRAPPED_CASES)
+def test_envelope_bare_body_is_returned_as_is(
+    name: str, status: int, resource: dict[str, Any], call: Callable[[BudgetBakers], Any]
+) -> None:
+    _seen, handler = recording([httpx.Response(status, json=resource)])
+    assert call(make_bb(handler)) == resource, name
+
+
+def test_wait_for_terminal_reads_wrapped_sessions() -> None:
+    _seen, handler = recording(
+        [
+            httpx.Response(200, json={"data": {"sessionId": "s1", "state": "Fetching"}}),
+            httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "sessionId": "s1",
+                        "state": "Completed",
+                        "connectionId": "conn1",
+                        "resultCode": "Ok",
+                    }
+                },
+            ),
+        ]
+    )
+    finished = (
+        make_bb(handler)
+        .client("c1")
+        .connect_sessions.wait_for_terminal("s1", poll_interval_ms=1, max_polls=5)
+    )
+    assert finished["state"] == "Completed"
+    assert finished["connectionId"] == "conn1"

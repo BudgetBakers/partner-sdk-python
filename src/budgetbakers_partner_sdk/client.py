@@ -1,8 +1,9 @@
 """The SDK surface, mirroring @budgetbakers/partner-sdk:
 client-scoped ergonomics hiding X-Client-Id, generator-based cursor
 pagination, automatic Idempotency-Key on creates (explicit override), and a
-connect-session polling helper. Reads and creates live on /v2; the
-connection lifecycle actions live on /v1.
+connect-session polling helper. Every call goes to /v2 and unwraps {data};
+the connection lifecycle actions, connect sessions and partner config also
+accept the bare body they answered before 0.3.0.
 Amounts are decimal.Decimal — never float."""
 
 from __future__ import annotations
@@ -45,34 +46,37 @@ class _Connections:
         self._t = transport
         self._cid = client_id
 
-    # Lifecycle actions (create, delete, refresh, reconnect, revoke) live on /v1.
     def create(self, provider_id: str, *, idempotency_key: str | None = None) -> JsonDict:
-        return self._t.request_dict(
+        return self._t.request_data_if_present(
             "POST",
-            "/v1/connections",
+            "/v2/connections",
             client_id=self._cid,
             body={"providerId": provider_id},
             idempotency_key=idempotency_key or str(uuid.uuid4()),
         )
 
     def get(self, connection_id: str) -> JsonDict:
-        """The stored connection record: state, provider, consent expiry."""
+        """The stored connection record: state, provider, consent expiry, last refresh,
+        and ``refreshState`` (``running``, ``succeeded``, ``failed`` or None when no
+        data fetch has been recorded)."""
         return self._t.request_data(
             "GET", f"/v2/connections/{_q(connection_id)}", client_id=self._cid
         )
 
     def delete(self, connection_id: str) -> None:
-        self._t.request_dict("DELETE", f"/v1/connections/{_q(connection_id)}", client_id=self._cid)
+        self._t.request_dict("DELETE", f"/v2/connections/{_q(connection_id)}", client_id=self._cid)
 
     def refresh(self, connection_id: str) -> JsonDict:
-        return self._t.request_dict(
-            "POST", f"/v1/connections/{_q(connection_id)}/refresh", client_id=self._cid
+        """``nextRefreshPossibleAt`` is None while the refresh runs; read the
+        connection after it finishes."""
+        return self._t.request_data_if_present(
+            "POST", f"/v2/connections/{_q(connection_id)}/refresh", client_id=self._cid
         )
 
     def reconnect(self, connection_id: str, *, idempotency_key: str | None = None) -> JsonDict:
-        return self._t.request_dict(
+        return self._t.request_data_if_present(
             "POST",
-            f"/v1/connections/{_q(connection_id)}/reconnect",
+            f"/v2/connections/{_q(connection_id)}/reconnect",
             client_id=self._cid,
             body={},
             idempotency_key=idempotency_key or str(uuid.uuid4()),
@@ -81,7 +85,7 @@ class _Connections:
     def revoke(self, connection_id: str) -> None:
         """Idempotent: revoking an already-Inactive connection is a no-op 200."""
         self._t.request_dict(
-            "PATCH", f"/v1/connections/{_q(connection_id)}/revoke", client_id=self._cid
+            "PATCH", f"/v2/connections/{_q(connection_id)}/revoke", client_id=self._cid
         )
 
     def account_pages(self, connection_id: str, *, limit: int | None = None) -> Iterator[JsonDict]:
@@ -178,7 +182,7 @@ class _ConnectSessions:
             body["providerId"] = provider_id
         if connection_id is not None:
             body["connectionId"] = connection_id
-        return self._t.request_dict(
+        return self._t.request_data_if_present(
             "POST",
             "/v2/connect-sessions",
             client_id=self._cid,
@@ -187,7 +191,7 @@ class _ConnectSessions:
         )
 
     def get(self, session_id: str) -> JsonDict:
-        return self._t.request_dict(
+        return self._t.request_data_if_present(
             "GET", f"/v2/connect-sessions/{_q(session_id)}", client_id=self._cid
         )
 
@@ -285,7 +289,7 @@ class _Partner:
 
     def get_config(self) -> JsonDict:
         """Capability discovery — self-description of the calling partner + key mode."""
-        return self._t.request_dict("GET", "/v2/partner/config")
+        return self._t.request_data_if_present("GET", "/v2/partner/config")
 
 
 class BudgetBakers:

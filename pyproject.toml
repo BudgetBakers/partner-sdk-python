@@ -1,12 +1,12 @@
 [project]
 name = "budgetbakers-partner-sdk"
-version = "0.2.1"
+version = "0.3.0"
 description = "BudgetBakers Partner API server SDK (AISP): typed client, webhook verification, hosted connect sessions."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "BudgetBakers", email = "integration@budgetbakers.com" }]
+authors = [{ name = "BudgetBakers", email = "partners@budgetbakers.com" }]
 keywords = ["budgetbakers", "open-banking", "aisp", "psd2", "partner-api", "webhooks"]
 classifiers = [
     "Development Status :: 4 - Beta",

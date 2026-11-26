@@ -8,6 +8,33 @@ site.
 
 ## [Unreleased]
 
+### Added
+
+- The `refreshState` key of `connections.get`: the state of the newest data
+  fetch (`running`, `succeeded` or `failed`), None when none has been recorded.
+
+## [0.3.0] - 2026-11-13
+
+### Added
+
+- The `lastRefreshedAt` and `nextRefreshPossibleAt` keys of `connections.get`:
+  the last successful data fetch (create, reconnect or refresh) and the
+  earliest time a manual refresh is accepted.
+- The `connectionId` key of `connections.refresh`: the connection being
+  refreshed.
+
+### Changed
+
+- `connections.create`, `refresh` and `reconnect`, `connect_sessions.create`
+  and `get`, and `partner.get_config` read the `{"data": ...}` envelope the
+  partner API now answers on `/v2`, and still accept the bare body, so this
+  version works before and after the API change. Return types are unchanged.
+- `nextRefreshPossibleAt` of `connections.refresh` is `None` after a refresh
+  is accepted: the cooldown is known only once the refresh finishes. Read the
+  connection after `ConnectionRefreshSuccess`.
+- The connection lifecycle actions (`connections.create`, `delete`, `refresh`,
+  `reconnect`, `revoke`) call their `/v2` paths. Request bodies are unchanged.
+
 ## [0.2.1] - 2026-10-08
 
 ### Added

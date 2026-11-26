@@ -97,6 +97,11 @@ class Transport:
         """request() for v2 single-resource operations: returns the envelope's ``data``."""
         return unwrap_data(self.request(method, path, **kwargs))
 
+    def request_data_if_present(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        """request() for the operations that answered bare bodies before 0.3.0;
+        see ``unwrap_data_if_present``."""
+        return unwrap_data_if_present(self.request(method, path, **kwargs))
+
 
 def unwrap_data(body: Any) -> dict[str, Any]:
     """Unwrap the v2 single-resource envelope ``{"data": ...}``."""
@@ -104,3 +109,15 @@ def unwrap_data(body: Any) -> dict[str, Any]:
         data = body["data"]
         return data if isinstance(data, dict) else {}
     raise TypeError("partner API: expected a { data } envelope")
+
+
+def unwrap_data_if_present(body: Any) -> dict[str, Any]:
+    """Unwrap ``{"data": {...}}`` when the body has that shape, else return the
+    body as is, so a deployment that still answers the pre-0.3.0 bare body
+    keeps working."""
+    if isinstance(body, dict):
+        data = body.get("data")
+        if isinstance(data, dict):
+            return data
+        return body
+    return {}

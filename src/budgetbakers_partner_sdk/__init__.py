@@ -1,7 +1,7 @@
 """budgetbakers-partner-sdk - BudgetBakers Partner API server SDK.
 
-Follows the Partner API v2 reference; the connection lifecycle actions follow
-the v1.1 reference.
+Follows the Partner API v2 reference; the connection lifecycle actions keep
+their v1.1 bodies there.
 """
 
 from . import webhooks
@@ -10,7 +10,7 @@ from .client import DEFAULT_BASE_URL, BudgetBakers, ClientScope
 from .errors import PartnerApiError, PartnerApiUnreachable
 from .webhooks import SIGNATURE_HEADER, TOLERANCE_SECONDS, parse_event, sign, verify
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 __all__ = [
     "DEFAULT_BASE_URL",

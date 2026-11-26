@@ -224,6 +224,7 @@ def _run_op(  # noqa: C901 — one dispatch table, mirrors PROTOCOL.md 1:1
             "id": conn.get("id"),
             "state": conn.get("state"),
             "consentExpiresAt": conn.get("consentExpiresAt"),
+            "consentRevokedAt": conn.get("consentRevokedAt"),
         }
     if op == "providersV2.listAll":
         codes: list[Any] = []
